@@ -6,142 +6,133 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#16302b" />
+    <meta name="theme-color" content="#13211e" />
     <meta
       name="description"
-      content="PWA per fotografare documenti, convertirli in PDF e condividerli su Telegram."
+      content="Scanner documenti PWA open source con OpenCV.js, PDF locale e condivisione su Telegram."
     />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./src/styles.css" />
-    <title>Docs Scanner</title>
+    <title>Docs Scanner OSS</title>
   </head>
   <body>
     <div id="app">
       <header class="hero">
-        <div class="hero__content">
-          <p class="eyebrow">PWA document scanner</p>
-          <h1>Scansiona documenti, crea PDF e condividili su Telegram.</h1>
+        <div class="hero__copy">
+          <p class="eyebrow">Open source document scanner</p>
+          <h1>Scansiona, correggi, binarizza e condividi.</h1>
           <p class="hero__lede">
-            Acquisizione multi-pagina con Scanbot Web SDK, filtro bianco/nero ad
-            alto contrasto e invio via share sheet nativo.
+            Fotocamera web nativa, rilevamento documento con OpenCV.js, PDF locale con
+            pdf-lib e invio a Telegram tramite share sheet del dispositivo.
           </p>
         </div>
-        <div class="hero__badge" id="sdk-status">SDK non inizializzato</div>
+        <div class="hero__stack">
+          <div class="status-pill" id="cv-status">OpenCV in caricamento</div>
+          <div class="status-pill" id="camera-status">Camera spenta</div>
+          <div class="status-pill" id="auto-status">Auto-scan attivo</div>
+        </div>
       </header>
 
       <main class="layout">
-        <section class="panel panel--controls">
-          <div class="panel__header">
-            <h2>Controlli</h2>
-            <p>Configura licenza, avvia la scansione e genera il PDF.</p>
-          </div>
-
-          <form id="settings-form" class="form-grid">
-            <label class="field">
-              <span>Chiave licenza Scanbot</span>
-              <input
-                id="license-key"
-                name="licenseKey"
-                type="password"
-                placeholder="Vuoto = trial da 60 secondi"
-                autocomplete="off"
-              />
-            </label>
-
-            <label class="field">
-              <span>Nome file PDF</span>
-              <input
-                id="pdf-filename"
-                name="pdfFilename"
-                type="text"
-                value="documento-scanbot.pdf"
-                autocomplete="off"
-              />
-            </label>
-
-            <label class="field">
-              <span>Titolo PDF</span>
-              <input
-                id="pdf-title"
-                name="pdfTitle"
-                type="text"
-                value="Documento digitalizzato"
-                autocomplete="off"
-              />
-            </label>
-
-            <label class="field">
-              <span>Messaggio share</span>
-              <textarea
-                id="share-text"
-                name="shareText"
-                rows="3"
-              >Documento PDF creato con Docs Scanner.</textarea>
-            </label>
-
-            <div class="field field--actions">
-              <button type="submit" class="button button--ghost">
-                Salva impostazioni
-              </button>
+        <section class="stage panel">
+          <div class="panel__header panel__header--stage">
+            <div>
+              <p class="panel__eyebrow">Scanner</p>
+              <h2>Acquisizione live</h2>
             </div>
-          </form>
-
-          <div class="actions">
-            <button id="scan-new-btn" class="button button--primary">
-              Nuova scansione
-            </button>
-            <button id="scan-continue-btn" class="button" disabled>
-              Aggiungi pagine
-            </button>
-            <button id="generate-pdf-btn" class="button" disabled>
-              Genera PDF
-            </button>
-            <button id="share-telegram-btn" class="button" disabled>
-              Condividi su Telegram
-            </button>
-            <button id="download-pdf-btn" class="button" disabled>
-              Scarica PDF
-            </button>
-            <button id="clear-document-btn" class="button button--danger" disabled>
-              Elimina bozza
-            </button>
+            <div class="panel__actions panel__actions--stage">
+              <button id="start-camera-btn" class="button button--primary">Avvia camera</button>
+              <button id="stop-camera-btn" class="button button--ghost" disabled>Ferma</button>
+              <button id="capture-btn" class="button" disabled>Scatta pagina</button>
+              <button id="toggle-auto-btn" class="button button--ghost">Auto ON</button>
+            </div>
           </div>
 
-          <div class="notice" id="notice-box">
-            Inserisci la licenza se disponibile, poi avvia una scansione.
+          <div class="camera-shell">
+            <div class="camera-frame">
+              <video id="camera-preview" class="camera-video" autoplay playsinline muted></video>
+              <svg id="scanner-overlay" class="camera-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <polygon id="document-polygon" class="camera-overlay__polygon" points="" />
+              </svg>
+              <div class="camera-guidance" id="camera-guidance">
+                Avvia la camera e inquadra il foglio su uno sfondo ben contrastato.
+              </div>
+            </div>
+
+            <aside class="stage-sidebar">
+              <div class="metric-card">
+                <span class="metric-card__label">Pagine</span>
+                <strong id="pages-count">0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-card__label">Filtro</span>
+                <strong>Bianco/Nero forte</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-card__label">Rilevamento</span>
+                <strong id="detection-status">In attesa</strong>
+              </div>
+              <p class="stage-sidebar__note">
+                L’auto-scan scatta quando il documento resta stabile per alcuni frame.
+              </p>
+            </aside>
           </div>
         </section>
 
-        <section class="panel panel--summary">
-          <div class="panel__header">
-            <h2>Documento corrente</h2>
-            <p id="document-summary">Nessuna bozza caricata.</p>
-          </div>
-
-          <div class="stats">
-            <article class="stat">
-              <span class="stat__label">Pagine</span>
-              <strong id="pages-count">0</strong>
-            </article>
-            <article class="stat">
-              <span class="stat__label">Filtro</span>
-              <strong>Bianco/Nero</strong>
-            </article>
-            <article class="stat">
-              <span class="stat__label">Modalità</span>
-              <strong>Auto capture</strong>
-            </article>
-          </div>
-
-          <div id="preview-grid" class="preview-grid">
-            <div class="empty-state">
-              Nessuna pagina acquisita. Avvia una scansione per vedere l’anteprima.
+        <section class="sidebar">
+          <section class="panel panel--settings">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Esportazione</p>
+              <h2>PDF e condivisione</h2>
+              <p>Zero licenze. Tutto in locale nel browser.</p>
             </div>
-          </div>
+
+            <form id="settings-form" class="settings-form">
+              <label class="field">
+                <span>Nome file PDF</span>
+                <input id="pdf-filename" name="pdfFilename" type="text" value="documento-open-source.pdf" autocomplete="off" />
+              </label>
+
+              <label class="field">
+                <span>Titolo PDF</span>
+                <input id="pdf-title" name="pdfTitle" type="text" value="Documento digitalizzato" autocomplete="off" />
+              </label>
+
+              <label class="field">
+                <span>Messaggio share</span>
+                <textarea id="share-text" name="shareText" rows="3">Documento PDF creato con Docs Scanner OSS.</textarea>
+              </label>
+
+              <button type="submit" class="button button--ghost">Salva impostazioni</button>
+            </form>
+
+            <div class="export-actions">
+              <button id="generate-pdf-btn" class="button" disabled>Genera PDF</button>
+              <button id="share-telegram-btn" class="button" disabled>Condividi su Telegram</button>
+              <button id="download-pdf-btn" class="button" disabled>Scarica PDF</button>
+              <button id="clear-pages-btn" class="button button--danger" disabled>Elimina pagine</button>
+            </div>
+
+            <div class="notice" id="notice-box">
+              Versione open source pronta. Avvia la camera per iniziare.
+            </div>
+          </section>
+
+          <section class="panel panel--pages">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Documento</p>
+              <h2>Pagine acquisite</h2>
+              <p id="document-summary">Nessuna pagina salvata.</p>
+            </div>
+            <div id="preview-grid" class="preview-grid">
+              <div class="empty-state">Le pagine processate appariranno qui.</div>
+            </div>
+          </section>
         </section>
       </main>
     </div>
+
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

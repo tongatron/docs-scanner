@@ -1,39 +1,57 @@
+import { PDFDocument } from "pdf-lib";
+
 const STORAGE_KEYS = {
-  licenseKey: "docs-scanner.license-key",
-  currentDocumentId: "docs-scanner.current-document-id",
-  pdfFilename: "docs-scanner.pdf-filename",
-  pdfTitle: "docs-scanner.pdf-title",
-  shareText: "docs-scanner.share-text"
+  pdfFilename: "docs-scanner-oss.pdf-filename",
+  pdfTitle: "docs-scanner-oss.pdf-title",
+  shareText: "docs-scanner-oss.share-text",
+  autoScan: "docs-scanner-oss.auto-scan"
 };
 
+const DB_NAME = "docs-scanner-oss";
+const DB_VERSION = 1;
+const DB_STORE = "kv";
 const APP_BASE_URL = new URL("./", document.baseURI);
-const ENGINE_PATH = new URL("scanbot-web-sdk/bin/complete/", APP_BASE_URL).href;
-const SCANBOT_SCRIPT_URL = new URL("scanbot-web-sdk/ScanbotSDK.ui2.min.js", APP_BASE_URL).href;
 
 const state = {
-  sdk: null,
-  initializedLicense: null,
-  currentDocument: null,
-  currentDocumentId: null,
+  cv: null,
+  cvReady: false,
+  stream: null,
+  cameraRunning: false,
+  autoScanEnabled: true,
+  pages: [],
   currentPdfBytes: null,
-  currentPdfName: "documento-scanbot.pdf",
-  previewUrls: []
+  currentPdfName: "documento-open-source.pdf",
+  lastDetection: null,
+  stableFrames: 0,
+  previousDetectionPoints: null,
+  analysisTimer: null,
+  lastCaptureAt: 0,
+  isCapturing: false,
+  canvases: {}
 };
 
 const elements = {
-  sdkStatus: document.getElementById("sdk-status"),
+  cvStatus: document.getElementById("cv-status"),
+  cameraStatus: document.getElementById("camera-status"),
+  autoStatus: document.getElementById("auto-status"),
+  detectionStatus: document.getElementById("detection-status"),
   noticeBox: document.getElementById("notice-box"),
   settingsForm: document.getElementById("settings-form"),
-  licenseKey: document.getElementById("license-key"),
   pdfFilename: document.getElementById("pdf-filename"),
   pdfTitle: document.getElementById("pdf-title"),
   shareText: document.getElementById("share-text"),
-  scanNewBtn: document.getElementById("scan-new-btn"),
-  scanContinueBtn: document.getElementById("scan-continue-btn"),
+  startCameraBtn: document.getElementById("start-camera-btn"),
+  stopCameraBtn: document.getElementById("stop-camera-btn"),
+  captureBtn: document.getElementById("capture-btn"),
+  toggleAutoBtn: document.getElementById("toggle-auto-btn"),
   generatePdfBtn: document.getElementById("generate-pdf-btn"),
   shareTelegramBtn: document.getElementById("share-telegram-btn"),
   downloadPdfBtn: document.getElementById("download-pdf-btn"),
-  clearDocumentBtn: document.getElementById("clear-document-btn"),
+  clearPagesBtn: document.getElementById("clear-pages-btn"),
+  cameraPreview: document.getElementById("camera-preview"),
+  scannerOverlay: document.getElementById("scanner-overlay"),
+  documentPolygon: document.getElementById("document-polygon"),
+  cameraGuidance: document.getElementById("camera-guidance"),
   pagesCount: document.getElementById("pages-count"),
   documentSummary: document.getElementById("document-summary"),
   previewGrid: document.getElementById("preview-grid")
@@ -50,361 +68,636 @@ bootstrap().catch((error) => {
 async function bootstrap() {
   hydrateSettings();
   bindEvents();
-  await loadScanbotScript();
   registerServiceWorker();
-  await initializeSdk(getLicenseKey());
-  await restoreStoredDocument();
-  syncButtons();
-}
-
-async function loadScanbotScript() {
-  if (window.ScanbotSDK) {
-    return;
-  }
-
-  await new Promise((resolve, reject) => {
-    const existingScript = document.querySelector("script[data-scanbot-sdk=true]");
-    if (existingScript) {
-      existingScript.addEventListener("load", () => resolve(), { once: true });
-      existingScript.addEventListener("error", () => reject(new Error("Impossibile caricare Scanbot Web SDK.")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = SCANBOT_SCRIPT_URL;
-    script.async = true;
-    script.dataset.scanbotSdk = "true";
-    script.addEventListener("load", () => resolve(), { once: true });
-    script.addEventListener("error", () => reject(new Error("Impossibile caricare Scanbot Web SDK.")), { once: true });
-    document.head.appendChild(script);
-  });
+  await loadOpenCv();
+  await restorePages();
+  syncUi();
 }
 
 function bindEvents() {
-  elements.settingsForm.addEventListener("submit", async (event) => {
+  elements.settingsForm.addEventListener("submit", (event) => {
     event.preventDefault();
     persistSettings();
-    await initializeSdk(getLicenseKey(), { force: true });
     setNotice("Impostazioni salvate.", "success");
   });
 
-  elements.scanNewBtn.addEventListener("click", async () => {
-    await openScanner({ resetDocument: true });
+  elements.startCameraBtn.addEventListener("click", async () => {
+    await startCamera();
   });
 
-  elements.scanContinueBtn.addEventListener("click", async () => {
-    await openScanner({ resetDocument: false });
+  elements.stopCameraBtn.addEventListener("click", async () => {
+    await stopCamera();
+  });
+
+  elements.captureBtn.addEventListener("click", async () => {
+    await capturePage({ automatic: false });
+  });
+
+  elements.toggleAutoBtn.addEventListener("click", () => {
+    state.autoScanEnabled = !state.autoScanEnabled;
+    persistSettings();
+    updateAutoUi();
+    setNotice(
+      state.autoScanEnabled
+        ? "Auto-scan attivato. Il sistema scattera quando il foglio resta stabile."
+        : "Auto-scan disattivato. Usa il pulsante Scatta pagina.",
+      "info"
+    );
   });
 
   elements.generatePdfBtn.addEventListener("click", async () => {
     await generatePdf();
   });
 
-  elements.shareTelegramBtn.addEventListener("click", async () => {
-    await sharePdf();
-  });
-
   elements.downloadPdfBtn.addEventListener("click", async () => {
     await downloadPdf();
   });
 
-  elements.clearDocumentBtn.addEventListener("click", async () => {
-    await clearCurrentDocument();
-  });
-}
-
-function hydrateSettings() {
-  elements.licenseKey.value = localStorage.getItem(STORAGE_KEYS.licenseKey) ?? "";
-  elements.pdfFilename.value =
-    localStorage.getItem(STORAGE_KEYS.pdfFilename) ?? "documento-scanbot.pdf";
-  elements.pdfTitle.value =
-    localStorage.getItem(STORAGE_KEYS.pdfTitle) ?? "Documento digitalizzato";
-  elements.shareText.value =
-    localStorage.getItem(STORAGE_KEYS.shareText) ??
-    "Documento PDF creato con Docs Scanner.";
-}
-
-function persistSettings() {
-  localStorage.setItem(STORAGE_KEYS.licenseKey, elements.licenseKey.value.trim());
-  localStorage.setItem(STORAGE_KEYS.pdfFilename, sanitizePdfFilename(elements.pdfFilename.value));
-  localStorage.setItem(STORAGE_KEYS.pdfTitle, elements.pdfTitle.value.trim());
-  localStorage.setItem(STORAGE_KEYS.shareText, elements.shareText.value.trim());
-}
-
-function getLicenseKey() {
-  return elements.licenseKey.value.trim();
-}
-
-async function initializeSdk(licenseKey, options = {}) {
-  const { force = false } = options;
-
-  if (!force && state.sdk && state.initializedLicense === licenseKey) {
-    return state.sdk;
-  }
-
-  elements.sdkStatus.textContent = "Inizializzazione Scanbot...";
-
-  state.sdk = await window.ScanbotSDK.initialize({
-    licenseKey,
-    enginePath: ENGINE_PATH
+  elements.shareTelegramBtn.addEventListener("click", async () => {
+    await sharePdf();
   });
 
-  state.initializedLicense = licenseKey;
+  elements.clearPagesBtn.addEventListener("click", async () => {
+    await clearPages();
+  });
 
-  const licenseInfo = await state.sdk.getLicenseInfo();
-  const isTrial = !licenseKey;
-  const statusLabel = licenseInfo?.isValid
-    ? "Licenza valida"
-    : isTrial
-      ? "Trial 60s"
-      : "Licenza non valida";
-
-  elements.sdkStatus.textContent = statusLabel;
-  return state.sdk;
-}
-
-async function restoreStoredDocument() {
-  const documentId = Number(localStorage.getItem(STORAGE_KEYS.currentDocumentId));
-
-  if (!documentId) {
-    renderDocumentState();
-    return;
-  }
-
-  try {
-    const document = await window.ScanbotSDK.UI.SBDocument.loadFromStorage(documentId);
-    state.currentDocument = document;
-    state.currentDocumentId = documentId;
-    setNotice("Bozza precedente ripristinata dal browser.", "info");
-  } catch (error) {
-    console.warn("Unable to restore stored document", error);
-    localStorage.removeItem(STORAGE_KEYS.currentDocumentId);
-    state.currentDocument = null;
-    state.currentDocumentId = null;
-    setNotice("La bozza salvata non è più disponibile.", "warning");
-  }
-
-  await renderDocumentState();
-}
-
-async function openScanner({ resetDocument }) {
-  try {
-    persistSettings();
-    await initializeSdk(getLicenseKey());
-    state.currentPdfBytes = null;
-
-    if (resetDocument && state.currentDocument) {
-      await clearCurrentDocument({ silent: true });
-    }
-
-    setBusy(true);
-    setNotice("Apro la fotocamera Scanbot...", "info");
-
-    const scanConfig = createDocumentScannerConfig(resetDocument);
-    const documentId = resetDocument ? undefined : state.currentDocumentId ?? undefined;
-    const result = await window.ScanbotSDK.UI.createDocumentScanner(scanConfig, documentId);
-
-    if (!result?.document) {
-      setNotice("Scansione annullata.", "warning");
-      return;
-    }
-
-    state.currentDocument = result.document;
-    state.currentDocumentId = await state.currentDocument.updateStorageDocument();
-    localStorage.setItem(STORAGE_KEYS.currentDocumentId, String(state.currentDocumentId));
-
-    await renderDocumentState();
-    setNotice("Documento aggiornato con successo.", "success");
-  } catch (error) {
-    console.error(error);
-    setNotice(
-      `Errore durante la scansione: ${error instanceof Error ? error.message : String(error)}`,
-      "error"
-    );
-  } finally {
-    setBusy(false);
-  }
-}
-
-function createDocumentScannerConfig(resetDocument) {
-  const Config = window.ScanbotSDK.UI.Config;
-
-  return new Config.DocumentScanningFlow({
-    cleanScanningSession: resetDocument,
-    showReviewScreenOnStart: false,
-    outputSettings: {
-      pagesScanLimit: 0,
-      documentImageSizeLimit: 2480,
-      documentAnalysisMode: "FILTERED_DOCUMENT",
-      defaultFilter: new Config.ScanbotBinarizationFilter({
-        outputMode: "BINARY"
-      })
-    },
-    localization: {
-      cameraTopBarTitle: "Scansiona documento",
-      cameraTopGuidance: "Una pagina alla volta, con cattura automatica.",
-      cameraUserGuidanceStart: "Inquadra il foglio dentro il riquadro.",
-      cameraUserGuidanceReadyToCapture: "Tieni ferma la mano: cattura in corso...",
-      cameraUserGuidanceReadyToCaptureManual: "Pronto per lo scatto.",
-      cameraUserGuidanceTooDark: "Serve piu luce per una scansione leggibile.",
-      cameraPreviewButtonTitle: "%d pagine",
-      reviewScreenTitle: "Revisione (%d)",
-      reviewScreenSubmitButtonTitle: "Usa documento",
-      reviewScreenAddButtonTitle: "Aggiungi",
-      reviewScreenRetakeButtonTitle: "Rifai",
-      reviewScreenCropButtonTitle: "Ritaglia",
-      reviewScreenRotateButtonTitle: "Ruota",
-      reviewScreenDeleteButtonTitle: "Elimina",
-      acknowledgementScreenBadDocumentHint:
-        "La qualita non basta ancora. Puoi rifare la pagina.",
-      acknowledgementRetakeButtonTitle: "Rifai",
-      acknowledgementAcceptButtonTitle: "Tieni pagina"
-    },
-    appearance: {
-      topBarBackgroundColor: "#16302b",
-      bottomBarBackgroundColor: "#16302b"
-    },
-    palette: {
-      sbColorPrimary: "#16302b",
-      sbColorPrimaryDisabled: "#b7c4c1",
-      sbColorNegative: "#c44536",
-      sbColorPositive: "#1f8f74",
-      sbColorWarning: "#d4a419",
-      sbColorSecondary: "#eef4ef",
-      sbColorSecondaryDisabled: "#e1e9e4",
-      sbColorOnPrimary: "#f7f5ef",
-      sbColorOnSecondary: "#16302b",
-      sbColorSurface: "#f7f5ef",
-      sbColorOutline: "#d3ddd8",
-      sbColorOnSurfaceVariant: "#576662",
-      sbColorOnSurface: "#16302b",
-      sbColorSurfaceLow: "#16302b26",
-      sbColorSurfaceHigh: "#16302b8c",
-      sbColorModalOverlay: "#0f1615b0"
-    },
-    screens: {
-      camera: {
-        openReviewAfterEachScan: false,
-        autoRotateImages: true,
-        acknowledgement: {
-          acknowledgementMode: "BAD_QUALITY",
-          minimumQuality: "REASONABLE"
-        },
-        cameraConfiguration: {
-          cameraModule: "BACK",
-          autoCropOnManualSnap: true,
-          flashEnabled: false,
-          autoSnappingEnabled: true,
-          autoSnappingSensitivity: 0.9,
-          autoSnappingDelay: 250,
-          fpsLimit: 20,
-          cameraLiveScannerResolution: "FULL_HD",
-          idealPreviewResolution: {
-            width: 1920,
-            height: 1080
-          }
-        },
-        viewFinder: {
-          visible: true
-        },
-        scanAssistanceOverlay: {
-          visible: false
-        }
-      },
-      review: {
-        enabled: true,
-        showLastPageWhenAdding: true
+  window.addEventListener("beforeunload", () => {
+    if (state.stream) {
+      for (const track of state.stream.getTracks()) {
+        track.stop();
       }
     }
   });
 }
 
+function hydrateSettings() {
+  elements.pdfFilename.value =
+    localStorage.getItem(STORAGE_KEYS.pdfFilename) ?? "documento-open-source.pdf";
+  elements.pdfTitle.value =
+    localStorage.getItem(STORAGE_KEYS.pdfTitle) ?? "Documento digitalizzato";
+  elements.shareText.value =
+    localStorage.getItem(STORAGE_KEYS.shareText) ??
+    "Documento PDF creato con Docs Scanner OSS.";
+  state.autoScanEnabled = (localStorage.getItem(STORAGE_KEYS.autoScan) ?? "true") === "true";
+  updateAutoUi();
+}
+
+function persistSettings() {
+  localStorage.setItem(STORAGE_KEYS.pdfFilename, sanitizePdfFilename(elements.pdfFilename.value));
+  localStorage.setItem(STORAGE_KEYS.pdfTitle, elements.pdfTitle.value.trim());
+  localStorage.setItem(STORAGE_KEYS.shareText, elements.shareText.value.trim());
+  localStorage.setItem(STORAGE_KEYS.autoScan, String(state.autoScanEnabled));
+}
+
+async function loadOpenCv() {
+  elements.cvStatus.textContent = "OpenCV in caricamento";
+
+  const opencvImport = await import("@techstark/opencv-js");
+  const cvSource = opencvImport.default ?? opencvImport;
+
+  if (cvSource instanceof Promise) {
+    state.cv = await cvSource;
+  } else {
+    state.cv = await new Promise((resolve) => {
+      cvSource.onRuntimeInitialized = () => resolve(cvSource);
+    });
+  }
+
+  state.cvReady = true;
+  elements.cvStatus.textContent = "OpenCV pronto";
+}
+
+async function startCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setNotice("Questo browser non supporta l’accesso alla fotocamera.", "error");
+    return;
+  }
+
+  if (state.cameraRunning) {
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      }
+    });
+
+    state.stream = stream;
+    elements.cameraPreview.srcObject = stream;
+    await elements.cameraPreview.play();
+
+    state.cameraRunning = true;
+    elements.cameraStatus.textContent = "Camera attiva";
+    elements.cameraGuidance.textContent =
+      "Inquadra il foglio. Il contorno verde appare quando il documento viene rilevato.";
+
+    syncUi();
+    scheduleAnalysis();
+    setNotice("Fotocamera pronta.", "success");
+  } catch (error) {
+    console.error(error);
+    setNotice(
+      `Impossibile avviare la camera: ${error instanceof Error ? error.message : String(error)}`,
+      "error"
+    );
+  }
+}
+
+async function stopCamera() {
+  clearTimeout(state.analysisTimer);
+  state.analysisTimer = null;
+  state.lastDetection = null;
+  state.previousDetectionPoints = null;
+  state.stableFrames = 0;
+  clearOverlay();
+
+  if (state.stream) {
+    for (const track of state.stream.getTracks()) {
+      track.stop();
+    }
+  }
+
+  state.stream = null;
+  state.cameraRunning = false;
+  elements.cameraPreview.srcObject = null;
+  elements.cameraStatus.textContent = "Camera spenta";
+  elements.detectionStatus.textContent = "In attesa";
+  elements.cameraGuidance.textContent =
+    "Camera ferma. Riavviala per acquisire altre pagine.";
+  syncUi();
+}
+
+function scheduleAnalysis() {
+  clearTimeout(state.analysisTimer);
+
+  if (!state.cameraRunning || !state.cvReady) {
+    return;
+  }
+
+  state.analysisTimer = window.setTimeout(async () => {
+    await analyzeFrame();
+    scheduleAnalysis();
+  }, 180);
+}
+
+async function analyzeFrame() {
+  if (!state.cameraRunning || state.isCapturing) {
+    return;
+  }
+
+  const video = elements.cameraPreview;
+  if (!video.videoWidth || !video.videoHeight) {
+    return;
+  }
+
+  const canvas = getCanvas("analysis");
+  const maxWidth = 960;
+  const scale = Math.min(1, maxWidth / video.videoWidth);
+  const width = Math.max(320, Math.round(video.videoWidth * scale));
+  const height = Math.round(video.videoHeight * scale);
+
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(video, 0, 0, width, height);
+
+  const detection = detectDocument(canvas);
+  const previousPoints = state.previousDetectionPoints;
+  state.lastDetection = detection;
+  renderOverlay(detection, width, height);
+
+  if (!detection) {
+    state.previousDetectionPoints = null;
+    state.stableFrames = 0;
+    elements.detectionStatus.textContent = "Documento non trovato";
+    elements.cameraGuidance.textContent =
+      "Avvicina il foglio, evita riflessi e aumenta il contrasto con lo sfondo.";
+    return;
+  }
+
+  elements.detectionStatus.textContent = `${Math.round(detection.areaRatio * 100)}% area`;
+
+  if (previousPoints) {
+    const movement = averagePointDistance(
+      detection.points,
+      previousPoints
+    );
+    state.stableFrames = movement < 14 ? state.stableFrames + 1 : 0;
+  } else {
+    state.stableFrames += 1;
+  }
+
+  state.previousDetectionPoints = detection.points.map((point) => ({ ...point }));
+
+  if (state.stableFrames >= 7) {
+    elements.cameraGuidance.textContent =
+      state.autoScanEnabled && Date.now() - state.lastCaptureAt > 1600
+        ? "Documento stabile: acquisizione automatica imminente."
+        : "Documento stabile. Puoi scattare ora.";
+  } else {
+    elements.cameraGuidance.textContent = "Allinea i bordi del foglio e tieni la mano ferma.";
+  }
+
+  if (
+    state.autoScanEnabled &&
+    state.stableFrames >= 7 &&
+    Date.now() - state.lastCaptureAt > 1600
+  ) {
+    await capturePage({ automatic: true });
+  }
+}
+
+function detectDocument(canvas) {
+  const cv = state.cv;
+  let src;
+  let gray;
+  let blurred;
+  let edges;
+  let contours;
+  let hierarchy;
+  let kernel;
+  let bestApprox = null;
+  let bestArea = 0;
+
+  try {
+    src = cv.imread(canvas);
+    gray = new cv.Mat();
+    blurred = new cv.Mat();
+    edges = new cv.Mat();
+    contours = new cv.MatVector();
+    hierarchy = new cv.Mat();
+    kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
+    cv.Canny(blurred, edges, 60, 180);
+    cv.dilate(edges, edges, kernel);
+    cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+
+    for (let index = 0; index < contours.size(); index += 1) {
+      const contour = contours.get(index);
+      const perimeter = cv.arcLength(contour, true);
+      const approx = new cv.Mat();
+      cv.approxPolyDP(contour, approx, 0.02 * perimeter, true);
+      const area = Math.abs(cv.contourArea(contour));
+
+      if (approx.rows === 4 && area > bestArea && cv.isContourConvex(approx)) {
+        if (bestApprox) {
+          bestApprox.delete();
+        }
+        bestApprox = approx;
+        bestArea = area;
+      } else {
+        approx.delete();
+      }
+
+      contour.delete();
+    }
+
+    if (!bestApprox) {
+      return null;
+    }
+
+    const points = [];
+    for (let index = 0; index < 4; index += 1) {
+      points.push({
+        x: bestApprox.data32S[index * 2],
+        y: bestApprox.data32S[index * 2 + 1]
+      });
+    }
+
+    const ordered = orderQuadPoints(points);
+    const areaRatio = bestArea / (canvas.width * canvas.height);
+
+    if (areaRatio < 0.18) {
+      bestApprox.delete();
+      return null;
+    }
+
+    bestApprox.delete();
+    return { points: ordered, areaRatio };
+  } catch (error) {
+    console.warn("Document detection failed", error);
+    return null;
+  } finally {
+    src?.delete();
+    gray?.delete();
+    blurred?.delete();
+    edges?.delete();
+    contours?.delete();
+    hierarchy?.delete();
+    kernel?.delete();
+    if (bestApprox) {
+      try {
+        bestApprox.delete();
+      } catch {
+        // noop
+      }
+    }
+  }
+}
+
+async function capturePage({ automatic }) {
+  if (!state.cameraRunning || state.isCapturing) {
+    return;
+  }
+
+  const video = elements.cameraPreview;
+  if (!video.videoWidth || !video.videoHeight) {
+    return;
+  }
+
+  try {
+    state.isCapturing = true;
+    state.lastCaptureAt = Date.now();
+    elements.cameraGuidance.textContent = automatic
+      ? "Auto-scan: elaboro la pagina..."
+      : "Elaboro la pagina...";
+    setNotice("Elaborazione OpenCV della pagina in corso.", "info");
+
+    const fullCanvas = getCanvas("capture");
+    fullCanvas.width = video.videoWidth;
+    fullCanvas.height = video.videoHeight;
+    fullCanvas.getContext("2d", { willReadFrequently: true }).drawImage(
+      video,
+      0,
+      0,
+      fullCanvas.width,
+      fullCanvas.height
+    );
+
+    const scaledPoints = scaleDetectionPoints(
+      state.lastDetection?.points ?? null,
+      getCanvas("analysis"),
+      fullCanvas
+    );
+
+    const processed = processCapturedCanvas(fullCanvas, scaledPoints);
+    const page = {
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      width: processed.width,
+      height: processed.height,
+      dataUrl: processed.dataUrl
+    };
+
+    state.pages.push(page);
+    await dbSet("pages", state.pages);
+    state.currentPdfBytes = null;
+    await renderPages();
+
+    elements.cameraGuidance.textContent = "Pagina acquisita. Continua con la successiva.";
+    setNotice(
+      automatic ? "Pagina acquisita automaticamente." : "Pagina acquisita.",
+      "success"
+    );
+  } catch (error) {
+    console.error(error);
+    setNotice(
+      `Errore durante la cattura: ${error instanceof Error ? error.message : String(error)}`,
+      "error"
+    );
+  } finally {
+    state.stableFrames = 0;
+    state.previousDetectionPoints = null;
+    state.isCapturing = false;
+    syncUi();
+  }
+}
+
+function processCapturedCanvas(canvas, points) {
+  const cv = state.cv;
+  let src;
+  let warped;
+  let gray;
+  let denoised;
+  let filtered;
+  let perspective;
+  let sourcePointsMat;
+  let destPointsMat;
+
+  try {
+    src = cv.imread(canvas);
+    const quad = points ?? deriveFullCanvasQuad(canvas);
+    const ordered = orderQuadPoints(quad);
+    const { width, height } = getWarpDimensions(ordered);
+
+    sourcePointsMat = cv.matFromArray(4, 1, cv.CV_32FC2, ordered.flatMap((point) => [point.x, point.y]));
+    destPointsMat = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, width, 0, width, height, 0, height]);
+    perspective = cv.getPerspectiveTransform(sourcePointsMat, destPointsMat);
+    warped = new cv.Mat();
+    cv.warpPerspective(
+      src,
+      warped,
+      perspective,
+      new cv.Size(width, height),
+      cv.INTER_LINEAR,
+      cv.BORDER_CONSTANT,
+      new cv.Scalar()
+    );
+
+    gray = new cv.Mat();
+    denoised = new cv.Mat();
+    filtered = new cv.Mat();
+    cv.cvtColor(warped, gray, cv.COLOR_RGBA2GRAY);
+    cv.medianBlur(gray, denoised, 3);
+    cv.adaptiveThreshold(
+      denoised,
+      filtered,
+      255,
+      cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+      cv.THRESH_BINARY,
+      35,
+      15
+    );
+
+    const outputCanvas = getCanvas("processed");
+    outputCanvas.width = width;
+    outputCanvas.height = height;
+    cv.imshow(outputCanvas, filtered);
+
+    return {
+      width,
+      height,
+      dataUrl: outputCanvas.toDataURL("image/jpeg", 0.92)
+    };
+  } finally {
+    src?.delete();
+    warped?.delete();
+    gray?.delete();
+    denoised?.delete();
+    filtered?.delete();
+    perspective?.delete();
+    sourcePointsMat?.delete();
+    destPointsMat?.delete();
+  }
+}
+
+function deriveFullCanvasQuad(canvas) {
+  const insetX = canvas.width * 0.04;
+  const insetY = canvas.height * 0.04;
+
+  return [
+    { x: insetX, y: insetY },
+    { x: canvas.width - insetX, y: insetY },
+    { x: canvas.width - insetX, y: canvas.height - insetY },
+    { x: insetX, y: canvas.height - insetY }
+  ];
+}
+
+function scaleDetectionPoints(points, fromCanvas, toCanvas) {
+  if (!points || !fromCanvas.width || !fromCanvas.height) {
+    return null;
+  }
+
+  const scaleX = toCanvas.width / fromCanvas.width;
+  const scaleY = toCanvas.height / fromCanvas.height;
+
+  return points.map((point) => ({
+    x: point.x * scaleX,
+    y: point.y * scaleY
+  }));
+}
+
+function getWarpDimensions(points) {
+  const widthTop = distance(points[0], points[1]);
+  const widthBottom = distance(points[3], points[2]);
+  const heightRight = distance(points[1], points[2]);
+  const heightLeft = distance(points[0], points[3]);
+
+  return {
+    width: Math.max(900, Math.round(Math.max(widthTop, widthBottom))),
+    height: Math.max(1200, Math.round(Math.max(heightLeft, heightRight)))
+  };
+}
+
+function orderQuadPoints(points) {
+  const sums = points.map((point) => point.x + point.y);
+  const diffs = points.map((point) => point.x - point.y);
+
+  return [
+    points[sums.indexOf(Math.min(...sums))],
+    points[diffs.indexOf(Math.max(...diffs))],
+    points[sums.indexOf(Math.max(...sums))],
+    points[diffs.indexOf(Math.min(...diffs))]
+  ];
+}
+
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function averagePointDistance(pointsA, pointsB) {
+  return pointsA.reduce((sum, point, index) => sum + distance(point, pointsB[index]), 0) / pointsA.length;
+}
+
+function renderOverlay(detection, width, height) {
+  elements.scannerOverlay.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+  if (!detection) {
+    clearOverlay();
+    return;
+  }
+
+  const points = detection.points.map((point) => `${point.x},${point.y}`).join(" ");
+  elements.documentPolygon.setAttribute("points", points);
+}
+
+function clearOverlay() {
+  elements.documentPolygon.setAttribute("points", "");
+}
+
+async function restorePages() {
+  const storedPages = (await dbGet("pages")) ?? [];
+  state.pages = Array.isArray(storedPages) ? storedPages : [];
+  await renderPages();
+}
+
+async function renderPages() {
+  const pageCount = state.pages.length;
+  elements.pagesCount.textContent = String(pageCount);
+
+  if (!pageCount) {
+    elements.documentSummary.textContent = "Nessuna pagina salvata.";
+    elements.previewGrid.innerHTML = '<div class="empty-state">Le pagine processate appariranno qui.</div>';
+    syncUi();
+    return;
+  }
+
+  elements.documentSummary.textContent = `${pageCount} pagina${pageCount > 1 ? "e" : ""} pronta${pageCount > 1 ? "e" : ""} per il PDF.`;
+  elements.previewGrid.innerHTML = state.pages
+    .map(
+      (page, index) => `
+        <figure class="page-card">
+          <img src="${page.dataUrl}" alt="Anteprima pagina ${index + 1}" class="page-card__image" />
+          <figcaption class="page-card__caption">Pagina ${index + 1}</figcaption>
+        </figure>
+      `
+    )
+    .join("");
+
+  syncUi();
+}
+
 async function generatePdf() {
-  if (!state.currentDocument) {
+  if (!state.pages.length) {
     setNotice("Non ci sono pagine da esportare.", "warning");
     return;
   }
 
   try {
     setBusy(true);
-    setNotice("Genero il PDF...", "info");
+    persistSettings();
+    setNotice("Genero il PDF open source...", "info");
 
-    const pdfFilename = sanitizePdfFilename(elements.pdfFilename.value);
-    const pdfTitle = elements.pdfTitle.value.trim() || "Documento digitalizzato";
+    const pdfDoc = await PDFDocument.create();
+    const margin = 24;
 
-    const bytes = await state.currentDocument.createPdf({
-      pageSize: "A4",
-      pageDirection: "PORTRAIT",
-      pageFit: "FIT_IN",
-      dpi: 200,
-      jpegQuality: 90,
-      attributes: {
-        title: pdfTitle,
-        author: "Docs Scanner",
-        creator: "Docs Scanner PWA"
-      }
-    });
+    for (const page of state.pages) {
+      const imageBytes = await fetch(page.dataUrl).then((response) => response.arrayBuffer());
+      const embeddedImage = await pdfDoc.embedJpg(imageBytes);
+      const isLandscape = embeddedImage.width > embeddedImage.height;
+      const pageWidth = isLandscape ? 841.89 : 595.28;
+      const pageHeight = isLandscape ? 595.28 : 841.89;
+      const pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
+      const availableWidth = pageWidth - margin * 2;
+      const availableHeight = pageHeight - margin * 2;
+      const scale = Math.min(availableWidth / embeddedImage.width, availableHeight / embeddedImage.height);
+      const drawWidth = embeddedImage.width * scale;
+      const drawHeight = embeddedImage.height * scale;
 
-    state.currentPdfBytes = bytes;
-    state.currentPdfName = pdfFilename;
+      pdfPage.drawImage(embeddedImage, {
+        x: (pageWidth - drawWidth) / 2,
+        y: (pageHeight - drawHeight) / 2,
+        width: drawWidth,
+        height: drawHeight
+      });
+    }
 
-    syncButtons();
+    const title = elements.pdfTitle.value.trim() || "Documento digitalizzato";
+    pdfDoc.setTitle(title);
+    pdfDoc.setAuthor("Docs Scanner OSS");
+    pdfDoc.setCreator("OpenCV.js + pdf-lib");
+    pdfDoc.setProducer("Docs Scanner OSS");
+    pdfDoc.setCreationDate(new Date());
+
+    state.currentPdfBytes = await pdfDoc.save();
+    state.currentPdfName = sanitizePdfFilename(elements.pdfFilename.value);
+    syncUi();
     setNotice("PDF pronto.", "success");
   } catch (error) {
     console.error(error);
     setNotice(
-      `Errore durante la creazione del PDF: ${error instanceof Error ? error.message : String(error)}`,
+      `Errore nella generazione PDF: ${error instanceof Error ? error.message : String(error)}`,
       "error"
     );
   } finally {
     setBusy(false);
-  }
-}
-
-async function sharePdf() {
-  if (!state.currentPdfBytes) {
-    await generatePdf();
-  }
-
-  if (!state.currentPdfBytes) {
-    return;
-  }
-
-  const file = new File([state.currentPdfBytes], state.currentPdfName, {
-    type: "application/pdf"
-  });
-
-  const shareData = {
-    files: [file],
-    title: elements.pdfTitle.value.trim() || "Documento digitalizzato",
-    text: elements.shareText.value.trim() || "Documento PDF creato con Docs Scanner."
-  };
-
-  try {
-    if (!navigator.share || !navigator.canShare || !navigator.canShare({ files: [file] })) {
-      setNotice(
-        "Questo browser non supporta la condivisione diretta del file. Scarica il PDF e invialo da Telegram.",
-        "warning"
-      );
-      return;
-    }
-
-    await navigator.share(shareData);
-    setNotice(
-      "Share sheet aperto. Se Telegram e disponibile sul dispositivo, puoi inviare il PDF da li.",
-      "success"
-    );
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      setNotice("Condivisione annullata.", "warning");
-      return;
-    }
-
-    console.error(error);
-    setNotice(
-      `Errore durante la condivisione: ${error instanceof Error ? error.message : String(error)}`,
-      "error"
-    );
   }
 }
 
@@ -426,105 +719,81 @@ async function downloadPdf() {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
-
   setNotice("Download PDF avviato.", "success");
 }
 
-async function clearCurrentDocument(options = {}) {
-  const { silent = false } = options;
-
-  if (state.currentDocument) {
-    await state.currentDocument.delete();
+async function sharePdf() {
+  if (!state.currentPdfBytes) {
+    await generatePdf();
   }
 
-  revokePreviewUrls();
-  state.currentDocument = null;
-  state.currentDocumentId = null;
-  state.currentPdfBytes = null;
-  localStorage.removeItem(STORAGE_KEYS.currentDocumentId);
-
-  renderDocumentState();
-
-  if (!silent) {
-    setNotice("Bozza eliminata.", "success");
-  }
-}
-
-async function renderDocumentState() {
-  revokePreviewUrls();
-
-  const pageCount = state.currentDocument?.pageCount ?? 0;
-  elements.pagesCount.textContent = String(pageCount);
-
-  if (!state.currentDocument || !pageCount) {
-    elements.documentSummary.textContent = "Nessuna bozza caricata.";
-    elements.previewGrid.innerHTML =
-      '<div class="empty-state">Nessuna pagina acquisita. Avvia una scansione per vedere l’anteprima.</div>';
-    syncButtons();
+  if (!state.currentPdfBytes) {
     return;
   }
 
-  elements.documentSummary.textContent = `Bozza locale #${state.currentDocumentId} con ${pageCount} pagine.`;
-  elements.previewGrid.innerHTML = "";
+  const file = new File([state.currentPdfBytes], state.currentPdfName, {
+    type: "application/pdf"
+  });
 
-  for (let index = 0; index < pageCount; index += 1) {
-    const page = state.currentDocument.pageAtIndex(index);
-    const image = (await page.loadDocumentImage()) ?? (await page.loadOriginalImage());
-    const bytes = await image.toJpeg(80);
-    const url = URL.createObjectURL(new Blob([bytes], { type: "image/jpeg" }));
-
-    state.previewUrls.push(url);
-
-    const figure = document.createElement("figure");
-    figure.className = "page-card";
-    figure.innerHTML = `
-      <img src="${url}" alt="Anteprima pagina ${index + 1}" class="page-card__image" />
-      <figcaption class="page-card__caption">Pagina ${index + 1}</figcaption>
-    `;
-
-    elements.previewGrid.appendChild(figure);
+  if (!navigator.share || !navigator.canShare || !navigator.canShare({ files: [file] })) {
+    setNotice(
+      "Questo browser non supporta la condivisione file diretta. Scarica il PDF e invialo da Telegram.",
+      "warning"
+    );
+    return;
   }
 
-  syncButtons();
-}
+  try {
+    await navigator.share({
+      files: [file],
+      title: elements.pdfTitle.value.trim() || "Documento digitalizzato",
+      text: elements.shareText.value.trim() || "Documento PDF creato con Docs Scanner OSS."
+    });
+    setNotice("Share sheet aperto. Se Telegram e installato puoi inviare il PDF da li.", "success");
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      setNotice("Condivisione annullata.", "warning");
+      return;
+    }
 
-function revokePreviewUrls() {
-  for (const url of state.previewUrls) {
-    URL.revokeObjectURL(url);
+    console.error(error);
+    setNotice(
+      `Errore durante la condivisione: ${error instanceof Error ? error.message : String(error)}`,
+      "error"
+    );
   }
-
-  state.previewUrls = [];
 }
 
-function syncButtons() {
-  const hasDocument = Boolean(state.currentDocument && state.currentDocument.pageCount > 0);
-  const hasPdf = Boolean(state.currentPdfBytes);
+async function clearPages() {
+  state.pages = [];
+  state.currentPdfBytes = null;
+  await dbDelete("pages");
+  await renderPages();
+  setNotice("Pagine eliminate dal browser.", "success");
+}
 
-  elements.scanContinueBtn.disabled = !hasDocument;
-  elements.generatePdfBtn.disabled = !hasDocument;
-  elements.clearDocumentBtn.disabled = !hasDocument;
-  elements.shareTelegramBtn.disabled = !hasDocument;
-  elements.downloadPdfBtn.disabled = !hasDocument || !hasPdf;
+function syncUi() {
+  const hasPages = state.pages.length > 0;
+  elements.startCameraBtn.disabled = state.cameraRunning || !state.cvReady;
+  elements.stopCameraBtn.disabled = !state.cameraRunning;
+  elements.captureBtn.disabled = !state.cameraRunning || state.isCapturing;
+  elements.generatePdfBtn.disabled = !hasPages;
+  elements.shareTelegramBtn.disabled = !hasPages;
+  elements.downloadPdfBtn.disabled = !state.currentPdfBytes;
+  elements.clearPagesBtn.disabled = !hasPages;
 }
 
 function setBusy(isBusy) {
-  const controls = [
-    elements.scanNewBtn,
-    elements.scanContinueBtn,
-    elements.generatePdfBtn,
-    elements.shareTelegramBtn,
-    elements.downloadPdfBtn,
-    elements.clearDocumentBtn
-  ];
+  elements.generatePdfBtn.disabled = isBusy || !state.pages.length;
+  elements.shareTelegramBtn.disabled = isBusy || !state.pages.length;
+  elements.downloadPdfBtn.disabled = isBusy || !state.currentPdfBytes;
+  elements.clearPagesBtn.disabled = isBusy || !state.pages.length;
+  elements.captureBtn.disabled = isBusy || !state.cameraRunning;
+}
 
-  for (const control of controls) {
-    control.disabled = isBusy || control.disabled;
-    control.dataset.busyLocked = isBusy ? "true" : "false";
-  }
-
-  if (!isBusy) {
-    syncButtons();
-  }
+function updateAutoUi() {
+  elements.autoStatus.textContent = state.autoScanEnabled ? "Auto-scan attivo" : "Auto-scan manuale";
+  elements.toggleAutoBtn.textContent = state.autoScanEnabled ? "Auto ON" : "Auto OFF";
 }
 
 function setNotice(message, tone = "info") {
@@ -533,7 +802,7 @@ function setNotice(message, tone = "info") {
 }
 
 function sanitizePdfFilename(filename) {
-  const fallback = "documento-scanbot.pdf";
+  const fallback = "documento-open-source.pdf";
   const cleaned = (filename || "")
     .trim()
     .replace(/[\\/:*?"<>|]+/g, "-")
@@ -546,14 +815,77 @@ function sanitizePdfFilename(filename) {
   return cleaned.toLowerCase().endsWith(".pdf") ? cleaned : `${cleaned}.pdf`;
 }
 
-async function registerServiceWorker() {
+function getCanvas(name) {
+  if (!state.canvases[name]) {
+    state.canvases[name] = document.createElement("canvas");
+  }
+
+  return state.canvases[name];
+}
+
+function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) {
     return;
   }
 
-  try {
-    await navigator.serviceWorker.register(new URL("sw.js", APP_BASE_URL));
-  } catch (error) {
+  navigator.serviceWorker.register(new URL("sw.js", APP_BASE_URL)).catch((error) => {
     console.warn("Service worker registration failed", error);
-  }
+  });
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) {
+        db.createObjectStore(DB_STORE, { keyPath: "key" });
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function dbGet(key) {
+  const db = await openDatabase();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, "readonly");
+    const store = tx.objectStore(DB_STORE);
+    const request = store.get(key);
+    request.onsuccess = () => resolve(request.result?.value ?? null);
+    request.onerror = () => reject(request.error);
+    tx.oncomplete = () => db.close();
+  });
+}
+
+async function dbSet(key, value) {
+  const db = await openDatabase();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, "readwrite");
+    tx.objectStore(DB_STORE).put({ key, value });
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function dbDelete(key) {
+  const db = await openDatabase();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(DB_STORE, "readwrite");
+    tx.objectStore(DB_STORE).delete(key);
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
 }

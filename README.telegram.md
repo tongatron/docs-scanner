@@ -1,54 +1,34 @@
 # Telegram Integration Notes
 
-## Scelta implementata
+## Cosa fa questa versione
 
-Questa app usa la condivisione file nativa del browser:
+La PWA genera il PDF nel browser e prova a condividerlo tramite `navigator.share()`.
 
-- genera un `File` PDF nel browser;
-- apre `navigator.share(...)`;
-- l'utente sceglie Telegram se disponibile nel sistema.
+Questo permette di:
 
-Questa strada e corretta per una PWA client-side perché non espone credenziali sensibili.
+- aprire lo share sheet del dispositivo;
+- scegliere Telegram se installato;
+- evitare token bot esposti lato client.
 
-## Perche non uso direttamente Bot API dal frontend
+## Cosa non fa
 
-Il metodo `sendDocument` del Bot API richiede un token bot. Mettere quel token in JavaScript client-side significherebbe esporlo a chiunque apra l'app.
+Questa versione non invia automaticamente il PDF a una chat Telegram tramite Bot API.
 
-Quindi:
+Per quello serve un backend o una function serverless.
 
-- frontend browser: bene per `navigator.share()`;
-- backend o serverless: necessario per `sendDocument`.
+## Se vuoi invio automatico via Bot API
 
-## Se vuoi invio automatico a una chat Telegram
-
-Serve un endpoint backend, ad esempio:
+Serve un endpoint backend, per esempio:
 
 - `POST /api/telegram/send-document`
 
-Input suggerito:
-
-```json
-{
-  "filename": "documento.pdf",
-  "chatId": "123456789"
-}
-```
-
 Il backend deve:
 
-1. ricevere il file PDF dal frontend;
+1. ricevere il PDF dal frontend;
 2. leggere `TELEGRAM_BOT_TOKEN` da ambiente sicuro;
-3. chiamare `https://api.telegram.org/bot<TOKEN>/sendDocument`;
-4. restituire esito al frontend.
+3. chiamare `sendDocument` del Bot API;
+4. restituire esito al browser.
 
-## Architettura consigliata
+## Perche non farlo direttamente dal frontend
 
-- frontend PWA: scansione, review, PDF
-- backend/serverless: upload PDF verso Telegram Bot API
-
-## Sicurezza minima
-
-- non salvare token bot nel repository;
-- non passare token nel client;
-- limita `chatId` consentiti se il flusso e dedicato a una sola chat o gruppo;
-- aggiungi rate limiting lato backend.
+Perche il token bot non deve stare nel codice client-side.

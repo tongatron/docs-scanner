@@ -1,16 +1,16 @@
 {
   "name": "docs-scanner",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "postinstall": "node ./scripts/copy-scanbot-sdk.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "scanbot-web-sdk": "^8.0.1"
+    "@techstark/opencv-js": "^4.12.0-release.1",
+    "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
     "vite": "^7.1.0"
