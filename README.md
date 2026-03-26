@@ -96,6 +96,18 @@ npm run build
 npm run preview
 ```
 
+Deploy su GitHub Pages:
+
+```bash
+npm run build
+```
+
+Pubblica il contenuto della cartella `dist/` su GitHub Pages, non i file sorgente del repository. Con Vite la build genera gli asset corretti sotto il path `/docs-scanner/`.
+
+Se su GitHub Pages vedi ancora riferimenti come `./src/main.js`, stai pubblicando il sorgente e non la build: in quel caso Chrome non vedra una PWA installabile e proporra solo `Crea scorciatoia`.
+
+In questo repository c'e anche il workflow [deploy-pages.yml](/Users/tonga/Documents/GitHub/docs-scanner/.github/workflows/deploy-pages.yml): se abiliti GitHub Pages con origine `GitHub Actions`, il deploy usera automaticamente `dist/`.
+
 ## Come si usa
 
 1. Apri l'app.
