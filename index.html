@@ -11,8 +11,10 @@
       name="description"
       content="Scanner documenti PWA open source con OpenCV.js, PDF locale e condivisione su Telegram."
     />
+    <meta name="mobile-web-app-capable" content="yes" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <link rel="stylesheet" href="./src/styles.css" />
     <title>Docs Scanner OSS</title>
   </head>
@@ -108,6 +110,9 @@
             </form>
 
             <div class="export-actions">
+              <button id="install-app-btn" class="button button--primary" hidden>
+                Installa app
+              </button>
               <button id="generate-pdf-btn" class="button" disabled>Genera PDF</button>
               <button id="share-telegram-btn" class="button" disabled>Condividi su Telegram</button>
               <button id="download-pdf-btn" class="button" disabled>Scarica PDF</button>

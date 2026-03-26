@@ -46,10 +46,47 @@ Tutto gira nel browser.
 
 ## Avvio
 
+Prerequisito per Android rapido su macOS:
+
+```bash
+brew install cloudflared
+```
+
+
 ```bash
 npm install
 npm run dev
 ```
+
+Avvio rapido da smartphone Android con HTTPS pubblico:
+
+```bash
+npm run android:install
+```
+
+Cosa fa questo comando:
+
+- esegue il build della PWA;
+- avvia `vite preview` su `0.0.0.0:4173`;
+- apre un Cloudflare Quick Tunnel HTTPS pubblico con `cloudflared`;
+- ti mostra in console l'URL `https://...` da aprire su Android.
+
+Flusso consigliato su telefono:
+
+1. lancia `npm run android:install`;
+2. copia l'URL HTTPS stampato da `cloudflared`;
+3. aprilo in Chrome Android;
+4. attendi il caricamento completo;
+5. usa il pulsante `Installa app` oppure il menu di Chrome `Aggiungi a schermata Home`;
+6. consenti la camera quando richiesto.
+
+Note pratiche:
+
+- `cloudflared tunnel --url ...` usa i Quick Tunnels ufficiali di Cloudflare e non richiede account per il caso di test rapido;
+
+- per vedere il prompt di installazione devi usare l'URL HTTPS del tunnel, non `file://` e non l'IP locale in HTTP;
+- il primo caricamento e piu pesante per via di OpenCV.js;
+- se il tunnel cambia URL, riapri il nuovo link dal telefono.
 
 Build produzione:
 

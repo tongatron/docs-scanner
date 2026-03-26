@@ -5,14 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:host": "vite --host 0.0.0.0 --port 4173 --strictPort",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:host": "vite preview --host 0.0.0.0 --port 4173 --strictPort",
+    "tunnel:android": "./scripts/run-cloudflared.sh",
+    "android:install": "npm run build && concurrently -k -n PREVIEW,TUNNEL -c blue,green \"npm:preview:host\" \"npm:tunnel:android\""
   },
   "dependencies": {
     "@techstark/opencv-js": "^4.12.0-release.1",
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
+    "concurrently": "^9.2.1",
     "vite": "^7.1.0"
   }
 }

@@ -18,6 +18,9 @@ const state = {
   stream: null,
   cameraRunning: false,
   autoScanEnabled: true,
+  installPromptEvent: null,
+  isInstalled:
+    window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true,
   pages: [],
   currentPdfBytes: null,
   currentPdfName: "documento-open-source.pdf",
@@ -44,6 +47,7 @@ const elements = {
   stopCameraBtn: document.getElementById("stop-camera-btn"),
   captureBtn: document.getElementById("capture-btn"),
   toggleAutoBtn: document.getElementById("toggle-auto-btn"),
+  installAppBtn: document.getElementById("install-app-btn"),
   generatePdfBtn: document.getElementById("generate-pdf-btn"),
   shareTelegramBtn: document.getElementById("share-telegram-btn"),
   downloadPdfBtn: document.getElementById("download-pdf-btn"),
@@ -68,6 +72,7 @@ bootstrap().catch((error) => {
 async function bootstrap() {
   hydrateSettings();
   bindEvents();
+  setupInstallPrompt();
   registerServiceWorker();
   await loadOpenCv();
   await restorePages();
@@ -103,6 +108,10 @@ function bindEvents() {
         : "Auto-scan disattivato. Usa il pulsante Scatta pagina.",
       "info"
     );
+  });
+
+  elements.installAppBtn.addEventListener("click", async () => {
+    await promptInstall();
   });
 
   elements.generatePdfBtn.addEventListener("click", async () => {
@@ -781,6 +790,7 @@ function syncUi() {
   elements.shareTelegramBtn.disabled = !hasPages;
   elements.downloadPdfBtn.disabled = !state.currentPdfBytes;
   elements.clearPagesBtn.disabled = !hasPages;
+  syncInstallUi();
 }
 
 function setBusy(isBusy) {
@@ -831,6 +841,46 @@ function registerServiceWorker() {
   navigator.serviceWorker.register(new URL("sw.js", APP_BASE_URL)).catch((error) => {
     console.warn("Service worker registration failed", error);
   });
+}
+
+function setupInstallPrompt() {
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    state.installPromptEvent = event;
+    syncInstallUi();
+    setNotice("Installazione PWA disponibile su questo device.", "success");
+  });
+
+  window.addEventListener("appinstalled", () => {
+    state.installPromptEvent = null;
+    state.isInstalled = true;
+    syncInstallUi();
+    setNotice("App installata correttamente.", "success");
+  });
+
+  syncInstallUi();
+}
+
+function syncInstallUi() {
+  const canInstall = Boolean(state.installPromptEvent) && !state.isInstalled;
+  elements.installAppBtn.hidden = !canInstall;
+  elements.installAppBtn.disabled = !canInstall;
+}
+
+async function promptInstall() {
+  if (!state.installPromptEvent) {
+    setNotice(
+      "Prompt di installazione non disponibile. Su Android serve HTTPS e un browser compatibile.",
+      "warning"
+    );
+    return;
+  }
+
+  const promptEvent = state.installPromptEvent;
+  await promptEvent.prompt();
+  await promptEvent.userChoice;
+  state.installPromptEvent = null;
+  syncInstallUi();
 }
 
 function openDatabase() {

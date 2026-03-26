@@ -1,5 +1,12 @@
-const CACHE_NAME = "docs-scanner-shell-v1";
-const SHELL_FILES = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
+const CACHE_NAME = "docs-scanner-shell-v2";
+const SHELL_FILES = [
+  "./",
+  "./index.html",
+  "./manifest.webmanifest",
+  "./icons/icon.svg",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png"
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -40,7 +47,7 @@ self.addEventListener("fetch", (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseClone));
           return networkResponse;
         })
-        .catch(() => caches.match("/index.html"));
+        .catch(() => caches.match("./index.html"));
     })
   );
 });
