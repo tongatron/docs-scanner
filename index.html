@@ -11,8 +11,9 @@
       name="description"
       content="PWA per fotografare documenti, convertirli in PDF e condividerli su Telegram."
     />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./src/styles.css" />
     <title>Docs Scanner</title>
   </head>
   <body>
@@ -141,8 +142,6 @@
         </section>
       </main>
     </div>
-
-    <script src="/scanbot-web-sdk/ScanbotSDK.ui2.min.js"></script>
-    <script type="module" src="/src/main.js"></script>
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>

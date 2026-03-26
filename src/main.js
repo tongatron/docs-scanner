@@ -1,5 +1,3 @@
-import "./styles.css";
-
 const STORAGE_KEYS = {
   licenseKey: "docs-scanner.license-key",
   currentDocumentId: "docs-scanner.current-document-id",
@@ -8,7 +6,9 @@ const STORAGE_KEYS = {
   shareText: "docs-scanner.share-text"
 };
 
-const ENGINE_PATH = "/scanbot-web-sdk/bin/complete/";
+const APP_BASE_URL = new URL("./", document.baseURI);
+const ENGINE_PATH = new URL("scanbot-web-sdk/bin/complete/", APP_BASE_URL).href;
+const SCANBOT_SCRIPT_URL = new URL("scanbot-web-sdk/ScanbotSDK.ui2.min.js", APP_BASE_URL).href;
 
 const state = {
   sdk: null,
@@ -50,10 +50,34 @@ bootstrap().catch((error) => {
 async function bootstrap() {
   hydrateSettings();
   bindEvents();
+  await loadScanbotScript();
   registerServiceWorker();
   await initializeSdk(getLicenseKey());
   await restoreStoredDocument();
   syncButtons();
+}
+
+async function loadScanbotScript() {
+  if (window.ScanbotSDK) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    const existingScript = document.querySelector("script[data-scanbot-sdk=true]");
+    if (existingScript) {
+      existingScript.addEventListener("load", () => resolve(), { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("Impossibile caricare Scanbot Web SDK.")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = SCANBOT_SCRIPT_URL;
+    script.async = true;
+    script.dataset.scanbotSdk = "true";
+    script.addEventListener("load", () => resolve(), { once: true });
+    script.addEventListener("error", () => reject(new Error("Impossibile caricare Scanbot Web SDK.")), { once: true });
+    document.head.appendChild(script);
+  });
 }
 
 function bindEvents() {
@@ -528,7 +552,7 @@ async function registerServiceWorker() {
   }
 
   try {
-    await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.register(new URL("sw.js", APP_BASE_URL));
   } catch (error) {
     console.warn("Service worker registration failed", error);
   }
