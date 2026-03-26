@@ -11,6 +11,7 @@ const DB_NAME = "docs-scanner-oss";
 const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_BASE_URL = new URL("./", document.baseURI);
+const USER_AGENT = navigator.userAgent || "";
 
 const state = {
   cv: null,
@@ -21,6 +22,12 @@ const state = {
   installPromptEvent: null,
   isInstalled:
     window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true,
+  isAndroid: /Android/i.test(USER_AGENT),
+  isChrome:
+    /Chrome|CriOS/i.test(USER_AGENT) && !/EdgA|SamsungBrowser|OPR|Opera|Firefox|FxiOS/i.test(USER_AGENT),
+  isSecureContext: window.isSecureContext,
+  serviceWorkerRegistered: false,
+  serviceWorkerControlled: Boolean(navigator.serviceWorker?.controller),
   pages: [],
   currentPdfBytes: null,
   currentPdfName: "documento-open-source.pdf",
@@ -48,6 +55,7 @@ const elements = {
   captureBtn: document.getElementById("capture-btn"),
   toggleAutoBtn: document.getElementById("toggle-auto-btn"),
   installAppBtn: document.getElementById("install-app-btn"),
+  installHelp: document.getElementById("install-help"),
   generatePdfBtn: document.getElementById("generate-pdf-btn"),
   shareTelegramBtn: document.getElementById("share-telegram-btn"),
   downloadPdfBtn: document.getElementById("download-pdf-btn"),
@@ -73,7 +81,7 @@ async function bootstrap() {
   hydrateSettings();
   bindEvents();
   setupInstallPrompt();
-  registerServiceWorker();
+  await registerServiceWorker();
   await loadOpenCv();
   await restorePages();
   syncUi();
@@ -833,14 +841,25 @@ function getCanvas(name) {
   return state.canvases[name];
 }
 
-function registerServiceWorker() {
+async function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) {
     return;
   }
 
-  navigator.serviceWorker.register(new URL("sw.js", APP_BASE_URL)).catch((error) => {
-    console.warn("Service worker registration failed", error);
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    state.serviceWorkerControlled = true;
+    syncInstallUi();
   });
+
+  try {
+    await navigator.serviceWorker.register(new URL("sw.js", APP_BASE_URL));
+    state.serviceWorkerRegistered = true;
+    state.serviceWorkerControlled = Boolean(navigator.serviceWorker.controller);
+    await navigator.serviceWorker.ready;
+    syncInstallUi();
+  } catch (error) {
+    console.warn("Service worker registration failed", error);
+  }
 }
 
 function setupInstallPrompt() {
@@ -862,17 +881,22 @@ function setupInstallPrompt() {
 }
 
 function syncInstallUi() {
-  const canInstall = Boolean(state.installPromptEvent) && !state.isInstalled;
-  elements.installAppBtn.hidden = !canInstall;
-  elements.installAppBtn.disabled = !canInstall;
+  const canPrompt = Boolean(state.installPromptEvent) && !state.isInstalled;
+  const shouldShowGuide = !state.isInstalled && state.isAndroid;
+
+  elements.installAppBtn.hidden = !canPrompt && !shouldShowGuide;
+  elements.installAppBtn.disabled = false;
+  elements.installAppBtn.textContent = canPrompt ? "Installa app" : "Guida installazione";
+
+  if (elements.installHelp) {
+    elements.installHelp.hidden = state.isInstalled;
+    elements.installHelp.textContent = getInstallGuidance();
+  }
 }
 
 async function promptInstall() {
   if (!state.installPromptEvent) {
-    setNotice(
-      "Prompt di installazione non disponibile. Su Android serve HTTPS e un browser compatibile.",
-      "warning"
-    );
+    setNotice(getInstallGuidance(), "warning");
     return;
   }
 
@@ -881,6 +905,34 @@ async function promptInstall() {
   await promptEvent.userChoice;
   state.installPromptEvent = null;
   syncInstallUi();
+}
+
+function getInstallGuidance() {
+  if (!state.isSecureContext) {
+    return "Installazione non disponibile: apri l'app da un URL HTTPS valido, non da HTTP locale.";
+  }
+
+  if (state.isInstalled) {
+    return "L'app risulta gia installata su questo device.";
+  }
+
+  if (state.installPromptEvent) {
+    return "La PWA e pronta per l'installazione diretta da questa schermata.";
+  }
+
+  if (state.isAndroid && state.isChrome) {
+    if (!state.serviceWorkerRegistered || !state.serviceWorkerControlled) {
+      return "Chrome Android non ha ancora completato l'attivazione PWA. Ricarica una volta la pagina, attendi qualche secondo e poi usa il menu ⋮ > Installa app.";
+    }
+
+    return "Se il pulsante di Chrome non compare, apri il menu ⋮ del browser e usa Installa app. Su alcuni URL tunnel nuovi il prompt compare solo dopo una ricarica.";
+  }
+
+  if (state.isAndroid) {
+    return "Su Android prova dal menu del browser con Aggiungi a schermata Home o Installa app, se disponibile.";
+  }
+
+  return "Il prompt automatico non e disponibile in questo browser. Verifica il menu del browser per l'installazione come app.";
 }
 
 function openDatabase() {

@@ -77,14 +77,15 @@ Flusso consigliato su telefono:
 2. copia l'URL HTTPS stampato da `cloudflared`;
 3. aprilo in Chrome Android;
 4. attendi il caricamento completo;
-5. usa il pulsante `Installa app` oppure il menu di Chrome `Aggiungi a schermata Home`;
-6. consenti la camera quando richiesto.
+5. se non compare subito `Installa app`, ricarica una volta la pagina;
+6. usa il pulsante `Installa app` oppure il menu di Chrome `Installa app` o `Aggiungi a schermata Home`;
+7. consenti la camera quando richiesto.
 
 Note pratiche:
 
 - `cloudflared tunnel --url ...` usa i Quick Tunnels ufficiali di Cloudflare e non richiede account per il caso di test rapido;
-
 - per vedere il prompt di installazione devi usare l'URL HTTPS del tunnel, non `file://` e non l'IP locale in HTTP;
+- sui tunnel con URL nuovo il primo accesso puo non mostrare subito il prompt PWA: una ricarica della pagina spesso basta;
 - il primo caricamento e piu pesante per via di OpenCV.js;
 - se il tunnel cambia URL, riapri il nuovo link dal telefono.
 
