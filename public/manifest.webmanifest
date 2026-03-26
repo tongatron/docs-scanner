@@ -1,0 +1,17 @@
+{
+  "name": "Docs Scanner",
+  "short_name": "DocsScanner",
+  "description": "PWA per fotografare documenti, convertirli in PDF e condividerli su Telegram.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f2eee5",
+  "theme_color": "#16302b",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
