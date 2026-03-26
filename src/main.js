@@ -12,6 +12,7 @@ const DB_VERSION = 1;
 const DB_STORE = "kv";
 const APP_BASE_URL = new URL("./", document.baseURI);
 const USER_AGENT = navigator.userAgent || "";
+const BROWSER_LABEL = detectBrowserLabel(USER_AGENT);
 
 const state = {
   cv: null,
@@ -56,6 +57,11 @@ const elements = {
   toggleAutoBtn: document.getElementById("toggle-auto-btn"),
   installAppBtn: document.getElementById("install-app-btn"),
   installHelp: document.getElementById("install-help"),
+  diagSecure: document.getElementById("diag-secure"),
+  diagSwRegistered: document.getElementById("diag-sw-registered"),
+  diagSwControlled: document.getElementById("diag-sw-controlled"),
+  diagInstallPrompt: document.getElementById("diag-install-prompt"),
+  diagBrowser: document.getElementById("diag-browser"),
   generatePdfBtn: document.getElementById("generate-pdf-btn"),
   shareTelegramBtn: document.getElementById("share-telegram-btn"),
   downloadPdfBtn: document.getElementById("download-pdf-btn"),
@@ -799,6 +805,7 @@ function syncUi() {
   elements.downloadPdfBtn.disabled = !state.currentPdfBytes;
   elements.clearPagesBtn.disabled = !hasPages;
   syncInstallUi();
+  syncDiagnosticsUi();
 }
 
 function setBusy(isBusy) {
@@ -894,6 +901,28 @@ function syncInstallUi() {
   }
 }
 
+function syncDiagnosticsUi() {
+  if (elements.diagSecure) {
+    elements.diagSecure.textContent = state.isSecureContext ? "OK" : "NO";
+  }
+
+  if (elements.diagSwRegistered) {
+    elements.diagSwRegistered.textContent = state.serviceWorkerRegistered ? "OK" : "NO";
+  }
+
+  if (elements.diagSwControlled) {
+    elements.diagSwControlled.textContent = state.serviceWorkerControlled ? "OK" : "NO";
+  }
+
+  if (elements.diagInstallPrompt) {
+    elements.diagInstallPrompt.textContent = state.installPromptEvent ? "OK" : "NO";
+  }
+
+  if (elements.diagBrowser) {
+    elements.diagBrowser.textContent = BROWSER_LABEL;
+  }
+}
+
 async function promptInstall() {
   if (!state.installPromptEvent) {
     setNotice(getInstallGuidance(), "warning");
@@ -933,6 +962,30 @@ function getInstallGuidance() {
   }
 
   return "Il prompt automatico non e disponibile in questo browser. Verifica il menu del browser per l'installazione come app.";
+}
+
+function detectBrowserLabel(userAgent) {
+  if (/SamsungBrowser/i.test(userAgent)) {
+    return "Samsung Internet";
+  }
+
+  if (/EdgA/i.test(userAgent)) {
+    return "Microsoft Edge Android";
+  }
+
+  if (/OPR|Opera/i.test(userAgent)) {
+    return "Opera";
+  }
+
+  if (/Firefox|FxiOS/i.test(userAgent)) {
+    return "Firefox";
+  }
+
+  if (/Chrome|CriOS/i.test(userAgent)) {
+    return /Android/i.test(userAgent) ? "Chrome Android" : "Chrome";
+  }
+
+  return "Browser non riconosciuto";
 }
 
 function openDatabase() {

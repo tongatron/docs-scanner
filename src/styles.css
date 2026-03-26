@@ -263,6 +263,30 @@ textarea {
   line-height: 1.5;
 }
 
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  padding: 0 1.5rem 1.5rem;
+}
+
+.diagnostic-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  background: rgba(19, 33, 30, 0.05);
+}
+
+.diagnostic-card--wide {
+  grid-column: 1 / -1;
+}
+
+.diagnostic-card__label {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .field {
   display: grid;
   gap: 0.42rem;
@@ -427,8 +451,13 @@ textarea {
   .camera-shell,
   .settings-form,
   .export-actions,
+  .diagnostics-grid,
   .preview-grid {
     padding: 1rem;
+  }
+
+  .diagnostics-grid {
+    grid-template-columns: 1fr;
   }
 
   .camera-frame {

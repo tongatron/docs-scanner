@@ -128,6 +128,36 @@
             </div>
           </section>
 
+          <section class="panel panel--diagnostics">
+            <div class="panel__header">
+              <p class="panel__eyebrow">Diagnostica PWA</p>
+              <h2>Stato installazione</h2>
+              <p>Usa questi indicatori sul telefono per capire perche Chrome non propone l'installazione.</p>
+            </div>
+            <div class="diagnostics-grid">
+              <div class="diagnostic-card">
+                <span class="diagnostic-card__label">HTTPS</span>
+                <strong id="diag-secure">In verifica</strong>
+              </div>
+              <div class="diagnostic-card">
+                <span class="diagnostic-card__label">Service worker</span>
+                <strong id="diag-sw-registered">In verifica</strong>
+              </div>
+              <div class="diagnostic-card">
+                <span class="diagnostic-card__label">Pagina controllata</span>
+                <strong id="diag-sw-controlled">In verifica</strong>
+              </div>
+              <div class="diagnostic-card">
+                <span class="diagnostic-card__label">Prompt installazione</span>
+                <strong id="diag-install-prompt">In verifica</strong>
+              </div>
+              <div class="diagnostic-card diagnostic-card--wide">
+                <span class="diagnostic-card__label">Browser rilevato</span>
+                <strong id="diag-browser">In verifica</strong>
+              </div>
+            </div>
+          </section>
+
           <section class="panel panel--pages">
             <div class="panel__header">
               <p class="panel__eyebrow">Documento</p>
