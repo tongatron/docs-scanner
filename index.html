@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lemmings in fuga</title>
+  <style>
+    :root {
+      --bg1: #dff6ff;
+      --bg2: #f8fbff;
+      --grass: #8ecf6b;
+      --dirt: #8c6a4b;
+      --panel: rgba(255,255,255,0.7);
+      --text: #1f2a37;
+      --shadow: rgba(0,0,0,0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 20% 20%, #ffffff 0, rgba(255,255,255,0.65) 18%, transparent 19%),
+        radial-gradient(circle at 80% 25%, #ffffff 0, rgba(255,255,255,0.7) 16%, transparent 17%),
+        linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 60%, #eef8ff 100%);
+    }
+
+    #world {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+
+    .hill {
+      position: absolute;
+      bottom: 72px;
+      border-radius: 50%;
+      filter: blur(1px);
+      opacity: 0.9;
+    }
+
+    .hill.h1 {
+      width: 40vw; height: 16vw; left: -5vw;
+      background: #9cdc76;
+    }
+    .hill.h2 {
+      width: 36vw; height: 14vw; left: 25vw;
+      background: #7fc962;
+    }
+    .hill.h3 {
+      width: 42vw; height: 15vw; right: -6vw;
+      background: #98d874;
+    }
+
+    .ground {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 72px;
+      background:
+        linear-gradient(180deg, var(--grass) 0 12px, var(--dirt) 12px 100%);
+      box-shadow: inset 0 10px 0 rgba(255,255,255,0.15);
+    }
+
+    .panel {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      z-index: 20;
+      background: var(--panel);
+      border: 1px solid rgba(255,255,255,0.8);
+      backdrop-filter: blur(8px);
+      padding: 14px 16px;
+      border-radius: 18px;
+      box-shadow: 0 12px 28px var(--shadow);
+      max-width: 360px;
+    }
+
+    .panel h1 {
+      margin: 0 0 6px;
+      font-size: 1.3rem;
+    }
+
+    .panel p {
+      margin: 0;
+      line-height: 1.35;
+      font-size: 0.95rem;
+    }
+
+    .panel .buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 9px 14px;
+      font-size: 0.92rem;
+      cursor: pointer;
+      background: #1f7aea;
+      color: white;
+      box-shadow: 0 6px 18px rgba(31,122,234,0.25);
+    }
+
+    button.secondary {
+      background: #ffffff;
+      color: #243447;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+    }
+
+    .counter {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      z-index: 20;
+      background: rgba(255,255,255,0.78);
+      border-radius: 999px;
+      padding: 10px 14px;
+      box-shadow: 0 10px 24px var(--shadow);
+      font-size: 0.95rem;
+      backdrop-filter: blur(8px);
+    }
+
+    .lemming {
+      position: absolute;
+      width: 28px;
+      height: 42px;
+      transform-origin: center bottom;
+      will-change: transform, left, top;
+      user-select: none;
+      pointer-events: none;
+    }
+
+    .lemming .hair {
+      position: absolute;
+      width: 18px;
+      height: 10px;
+      background: #39b54a;
+      border-radius: 10px 10px 6px 6px;
+      left: 5px;
+      top: 0;
+    }
+
+    .lemming .head {
+      position: absolute;
+      width: 16px;
+      height: 14px;
+      background: #ffd3a8;
+      border-radius: 50%;
+      left: 6px;
+      top: 6px;
+      box-shadow: inset 0 -1px 0 rgba(0,0,0,0.08);
+    }
+
+    .lemming .body {
+      position: absolute;
+      width: 18px;
+      height: 16px;
+      background: #375eea;
+      border-radius: 5px;
+      left: 5px;
+      top: 18px;
+    }
+
+    .lemming .arm,
+    .lemming .leg {
+      position: absolute;
+      background: #1e2430;
+      transform-origin: top center;
+      border-radius: 3px;
+    }
+
+    .lemming .arm.left  { width: 3px; height: 10px; left: 6px; top: 20px; }
+    .lemming .arm.right { width: 3px; height: 10px; left: 19px; top: 20px; }
+    .lemming .leg.left  { width: 4px; height: 12px; left: 9px; top: 31px; }
+    .lemming .leg.right { width: 4px; height: 12px; left: 15px; top: 31px; }
+
+    .lemming.walking .arm.left,
+    .lemming.walking .leg.right {
+      animation: swingA .34s infinite ease-in-out;
+    }
+
+    .lemming.walking .arm.right,
+    .lemming.walking .leg.left {
+      animation: swingB .34s infinite ease-in-out;
+    }
+
+    .lemming.falling {
+      filter: drop-shadow(0 6px 6px rgba(0,0,0,0.18));
+    }
+
+    .sparkle {
+      position: absolute;
+      font-size: 18px;
+      animation: pop .8s ease-out forwards;
+      pointer-events: none;
+    }
+
+    .speech {
+      position: absolute;
+      transform: translate(-50%, -100%);
+      background: rgba(255,255,255,0.92);
+      color: #233042;
+      font-size: 12px;
+      padding: 6px 9px;
+      border-radius: 12px;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.1);
+      white-space: nowrap;
+      pointer-events: none;
+      animation: speak 1.8s ease-out forwards;
+      z-index: 25;
+    }
+
+    @keyframes swingA {
+      0%,100% { transform: rotate(25deg); }
+      50% { transform: rotate(-25deg); }
+    }
+
+    @keyframes swingB {
+      0%,100% { transform: rotate(-25deg); }
+      50% { transform: rotate(25deg); }
+    }
+
+    @keyframes pop {
+      0% { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+      25% { opacity: 1; }
+      100% { transform: translate(-50%, -110px) scale(1.4); opacity: 0; }
+    }
+
+    @keyframes speak {
+      0% { opacity: 0; transform: translate(-50%, -80%) scale(0.85); }
+      15% { opacity: 1; }
+      100% { opacity: 0; transform: translate(-50%, -150%) scale(1); }
+    }
+
+    @media (max-width: 700px) {
+      .panel {
+        max-width: calc(100vw - 32px);
+      }
+      .counter {
+        top: auto;
+        bottom: 86px;
+        right: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="world">
+    <div class="panel">
+      <h1>Lemmings che girano senza un piano</h1>
+      <p>
+        Pagina leggera e un po' assurda: i lemmings camminano a caso, si girano, saltellano e commentano la loro esistenza.
+        Clicca sul prato per farne comparire altri.
+      </p>
+      <div class="buttons">
+        <button id="addBtn">Aggiungi lemming</button>
+        <button id="partyBtn" class="secondary">Modalità caos</button>
+      </div>
+    </div>
+
+    <div class="counter">Lemmings: <strong id="count">0</strong></div>
+
+    <div class="hill h1"></div>
+    <div class="hill h2"></div>
+    <div class="hill h3"></div>
+    <div class="ground"></div>
+  </div>
+
+  <script>
+    const world = document.getElementById('world');
+    const countEl = document.getElementById('count');
+    const addBtn = document.getElementById('addBtn');
+    const partyBtn = document.getElementById('partyBtn');
+
+    const groundHeight = 72;
+    const lemmings = [];
+    let partyMode = false;
+
+    const phrases = [
+      'Oh no.',
+      'Dove sto andando?',
+      'Mi sembra una cattiva idea.',
+      'Va tutto benissimo.',
+      'Seguo quello davanti.',
+      'Sono nato per vagare.',
+      'Perché corro? Non lo so.',
+      'Questo prato è sospetto.',
+      'Ho un compito? Spero di no.',
+      'Strategia: improvvisare.'
+    ];
+
+    function rand(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function clamp(v, min, max) {
+      return Math.max(min, Math.min(max, v));
+    }
+
+    function updateCount() {
+      countEl.textContent = lemmings.length;
+    }
+
+    function makeSpeech(x, y, text) {
+      const bubble = document.createElement('div');
+      bubble.className = 'speech';
+      bubble.textContent = text;
+      bubble.style.left = x + 'px';
+      bubble.style.top = y + 'px';
+      world.appendChild(bubble);
+      setTimeout(() => bubble.remove(), 1800);
+    }
+
+    function makeSparkle(x, y, emoji = '✨') {
+      const s = document.createElement('div');
+      s.className = 'sparkle';
+      s.textContent = emoji;
+      s.style.left = x + 'px';
+      s.style.top = y + 'px';
+      world.appendChild(s);
+      setTimeout(() => s.remove(), 800);
+    }
+
+    function createLemming(x = rand(30, window.innerWidth - 30)) {
+      const el = document.createElement('div');
+      el.className = 'lemming walking';
+      el.innerHTML = `
+        <div class="hair"></div>
+        <div class="head"></div>
+        <div class="body"></div>
+        <div class="arm left"></div>
+        <div class="arm right"></div>
+        <div class="leg left"></div>
+        <div class="leg right"></div>
+      `;
+
+      world.appendChild(el);
+
+      const lemming = {
+        el,
+        x,
+        y: window.innerHeight - groundHeight - 42,
+        vx: rand(-1.2, 1.2) || 0.8,
+        dir: Math.random() > 0.5 ? 1 : -1,
+        bob: rand(0, Math.PI * 2),
+        talkTimer: rand(90, 280),
+        jumpTimer: rand(120, 260),
+        vy: 0,
+        airborne: false,
+        size: 1
+      };
+
+      if (Math.abs(lemming.vx) < 0.4) lemming.vx = 0.7 * lemming.dir;
+      lemmings.push(lemming);
+      updateCount();
+      renderLemming(lemming);
+      makeSparkle(lemming.x + 14, lemming.y + 10, '🐾');
+    }
+
+    function renderLemming(l) {
+      const bobY = l.airborne ? 0 : Math.sin(l.bob) * 1.6;
+      l.el.style.left = l.x + 'px';
+      l.el.style.top = (l.y + bobY) + 'px';
+      const flip = l.dir < 0 ? -1 : 1;
+      const rot = l.airborne ? clamp(l.vy * 2, -24, 24) : 0;
+      l.el.style.transform = `scaleX(${flip}) scale(${l.size}) rotate(${rot}deg)`;
+      l.el.classList.toggle('walking', !l.airborne);
+      l.el.classList.toggle('falling', l.airborne);
+    }
+
+    function step() {
+      const maxX = window.innerWidth - 28;
+      const floorY = window.innerHeight - groundHeight - 42;
+
+      for (const l of lemmings) {
+        l.bob += 0.2 + Math.abs(l.vx) * 0.04;
+        l.talkTimer -= 1;
+        l.jumpTimer -= 1;
+
+        if (!l.airborne) {
+          l.x += l.vx;
+
+          if (Math.random() < (partyMode ? 0.03 : 0.008)) {
+            l.vx *= -1;
+            l.dir *= -1;
+          }
+
+          if (Math.random() < (partyMode ? 0.015 : 0.004)) {
+            l.vx += rand(-0.4, 0.4);
+            l.vx = clamp(l.vx, -2.6, 2.6);
+            if (Math.abs(l.vx) < 0.5) l.vx = 0.7 * (Math.random() > 0.5 ? 1 : -1);
+            l.dir = Math.sign(l.vx) || l.dir;
+          }
+
+          if (l.jumpTimer <= 0 && Math.random() < (partyMode ? 0.25 : 0.08)) {
+            l.airborne = true;
+            l.vy = rand(-4.8, -2.8);
+            l.jumpTimer = rand(120, 260);
+            makeSparkle(l.x + 14, l.y + 40, '💨');
+          }
+        } else {
+          l.y += l.vy;
+          l.vy += 0.18;
+          l.x += l.vx * 0.8;
+          if (l.y >= floorY) {
+            l.y = floorY;
+            l.vy = 0;
+            l.airborne = false;
+          }
+        }
+
+        if (l.x <= 0) {
+          l.x = 0;
+          l.vx = Math.abs(l.vx);
+          l.dir = 1;
+        }
+        if (l.x >= maxX) {
+          l.x = maxX;
+          l.vx = -Math.abs(l.vx);
+          l.dir = -1;
+        }
+
+        if (l.talkTimer <= 0) {
+          if (Math.random() < (partyMode ? 0.18 : 0.08)) {
+            makeSpeech(l.x + 14, l.y - 6, phrases[Math.floor(Math.random() * phrases.length)]);
+          }
+          l.talkTimer = rand(100, 320);
+        }
+
+        renderLemming(l);
+      }
+
+      requestAnimationFrame(step);
+    }
+
+    function addBurst(n = 6, x = null) {
+      for (let i = 0; i < n; i++) {
+        const px = x ?? rand(30, window.innerWidth - 30);
+        createLemming(clamp(px + rand(-60, 60), 10, window.innerWidth - 40));
+      }
+    }
+
+    addBtn.addEventListener('click', () => createLemming());
+
+    partyBtn.addEventListener('click', () => {
+      partyMode = !partyMode;
+      partyBtn.textContent = partyMode ? 'Calma apparente' : 'Modalità caos';
+      addBurst(partyMode ? 10 : 3);
+    });
+
+    world.addEventListener('click', (e) => {
+      if (e.target.closest('.panel')) return;
+      createLemming(e.clientX - 14);
+      if (Math.random() < 0.45) {
+        makeSparkle(e.clientX, e.clientY, '⭐');
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      for (const l of lemmings) {
+        l.x = clamp(l.x, 0, window.innerWidth - 28);
+        l.y = window.innerHeight - groundHeight - 42;
+        renderLemming(l);
+      }
+    });
+
+    addBurst(12);
+    step();
+  </script>
+</body>
+</html>
